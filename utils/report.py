@@ -1,61 +1,125 @@
-"""Create downloadable report text for the app."""
-
-from __future__ import annotations
-
 from datetime import datetime
-from typing import Dict, List
 
 
-def build_report(medicine_name: str, drug_info: Dict[str, str], caution_alerts: List[str], summary: str) -> str:
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    alerts = "\n".join(f"- {a}" for a in caution_alerts)
-    return f"""
-AI Medicine Safety & Drug Information Assistant
-Generated: {now}
+def yes_no(value):
+    return "Yes" if value else "No"
 
-IMPORTANT DISCLAIMER
-This report is for educational and portfolio demonstration purposes only. It is not medical advice, diagnosis, prescription, or dosage recommendation. Always consult a qualified doctor or pharmacist before using any medicine. In emergency symptoms, seek urgent medical care.
 
-SEARCHED MEDICINE
+def create_text_report(
+    medicine_name,
+    drug_data,
+    age_group="Adult",
+    kidney_issue=False,
+    liver_issue=False,
+    diabetes=False,
+    pregnancy=False,
+    allergy=False
+):
+    """
+    Creates a downloadable text report for medicine information.
+    This report is only for educational purposes.
+    """
+
+    report = f"""
+==================================================
+MediGuide AI - Medicine Information Report
+==================================================
+
+Generated On: {datetime.now().strftime("%d-%m-%Y %I:%M %p")}
+
+Medicine Name:
 {medicine_name}
 
-BASIC DETAILS
-Display name: {drug_info.get('display_name')}
-Generic name: {drug_info.get('generic_name')}
-Brand name: {drug_info.get('brand_name')}
-Manufacturer: {drug_info.get('manufacturer')}
-Product type: {drug_info.get('product_type')}
-Route: {drug_info.get('route')}
-RxNorm RxCUI: {drug_info.get('rxnorm_rxcui')}
-Data source: {drug_info.get('data_source_note')}
+--------------------------------------------------
+Health Safety Profile
+--------------------------------------------------
+Age Group: {age_group}
+Kidney Disease / Kidney Problem: {yes_no(kidney_issue)}
+Liver Disease / Liver Problem: {yes_no(liver_issue)}
+Diabetes: {yes_no(diabetes)}
+Pregnant / Planning Pregnancy: {yes_no(pregnancy)}
+Known Medicine Allergy: {yes_no(allergy)}
 
-USED FOR / INDICATIONS
-{drug_info.get('indications')}
+--------------------------------------------------
+Used For
+--------------------------------------------------
+{drug_data.get("indications", "Information not available.")}
 
-DOSAGE AND ADMINISTRATION LABEL TEXT
-{drug_info.get('dosage')}
+--------------------------------------------------
+How to Use
+--------------------------------------------------
+{drug_data.get("dosage", "Use only as prescribed by a doctor.")}
 
-WARNINGS
-{drug_info.get('warnings')}
+--------------------------------------------------
+Warnings
+--------------------------------------------------
+{drug_data.get("warnings", "Information not available.")}
 
-BOXED WARNING
-{drug_info.get('boxed_warning')}
+--------------------------------------------------
+Side Effects
+--------------------------------------------------
+{drug_data.get("side_effects", "Information not available.")}
 
-SIDE EFFECTS / ADVERSE REACTIONS
-{drug_info.get('side_effects')}
+--------------------------------------------------
+Contraindications
+--------------------------------------------------
+{drug_data.get("contraindications", "Information not available.")}
 
-CONTRAINDICATIONS
-{drug_info.get('contraindications')}
+--------------------------------------------------
+Personalized Safety Cautions
+--------------------------------------------------
+"""
 
-DRUG INTERACTIONS
-{drug_info.get('drug_interactions')}
+    if age_group == "Child":
+        report += "\n- Child caution: Medicine usage and dosage for children must be decided by a pediatric doctor."
 
-PREGNANCY / BREASTFEEDING INFORMATION
-{drug_info.get('pregnancy_or_breastfeeding')}
+    if age_group == "Senior Citizen":
+        report += "\n- Senior citizen caution: Older adults may need special dosage adjustment and monitoring."
 
-PERSONAL CAUTION ALERTS
-{alerts}
+    if kidney_issue:
+        report += "\n- Kidney caution: Some medicines can affect kidney function or need dose adjustment. Consult a doctor."
 
-SIMPLE SUMMARY
-{summary}
-""".strip()
+    if liver_issue:
+        report += "\n- Liver caution: Some medicines may affect the liver. Consult a doctor before using."
+
+    if diabetes:
+        report += "\n- Diabetes caution: Some medicines can affect blood sugar levels. Consult your doctor."
+
+    if pregnancy:
+        report += "\n- Pregnancy caution: Do not use medicines during pregnancy without doctor advice."
+
+    if allergy:
+        report += "\n- Allergy caution: Avoid medicines that caused allergy before and consult a doctor immediately."
+
+    if (
+        age_group == "Adult"
+        and not kidney_issue
+        and not liver_issue
+        and not diabetes
+        and not pregnancy
+        and not allergy
+    ):
+        report += "\n- No special safety profile selected. Still consult a doctor or pharmacist before using medicine."
+
+    report += """
+
+--------------------------------------------------
+Doctor Advice
+--------------------------------------------------
+Do not start, stop, or change medicine dosage without consulting a doctor.
+Seek urgent medical help if you experience breathing difficulty, swelling,
+severe rash, chest pain, fainting, or serious allergic reaction.
+
+--------------------------------------------------
+Disclaimer
+--------------------------------------------------
+This report is for educational and portfolio purposes only.
+It does not provide medical diagnosis, prescription, or dosage recommendation.
+Always consult a qualified doctor or pharmacist before taking any medicine.
+
+==================================================
+End of Report
+==================================================
+"""
+
+    return report
