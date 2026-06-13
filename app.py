@@ -1,283 +1,455 @@
-from __future__ import annotations
-
-import pandas as pd
 import streamlit as st
+import pandas as pd
+from datetime import date
 
-from utils.drug_api import get_drug_info, check_patient_cautions
+from utils.drug_api import get_drug_info
 from utils.ai_summary import generate_simple_summary
 from utils.ocr_utils import extract_text_from_image
-from utils.report import build_report
+from utils.report import create_text_report
 
 
+# -----------------------------
+# Page Configuration
+# -----------------------------
 st.set_page_config(
-    page_title="AI Medicine Safety Assistant",
+    page_title="MediGuide AI",
     page_icon="💊",
-    layout="wide",
+    layout="wide"
 )
 
-CUSTOM_CSS = """
-<style>
-.main-header {
-    padding: 1.2rem 1rem;
-    border-radius: 18px;
-    background: linear-gradient(135deg, #f8fbff 0%, #eef7ff 100%);
-    border: 1px solid #dbeafe;
-    margin-bottom: 1rem;
-}
-.metric-card {
-    padding: 1rem;
-    border-radius: 14px;
-    border: 1px solid #e5e7eb;
-    background: #ffffff;
-}
-.safe-box {
-    padding: 1rem;
-    border-radius: 12px;
-    border-left: 5px solid #f59e0b;
-    background: #fffbeb;
-}
-.small-muted { color: #6b7280; font-size: 0.92rem; }
-</style>
-"""
-st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+# -----------------------------
+# Custom CSS
+# -----------------------------
+st.markdown(
+    """
+    <style>
+    .main-title {
+        font-size: 42px;
+        font-weight: 800;
+        color: #1f6feb;
+        margin-bottom: 0px;
+    }
+
+    .sub-title {
+        font-size: 20px;
+        color: #444;
+        margin-top: 0px;
+        margin-bottom: 20px;
+    }
+
+    .warning-box {
+        background-color: #fff3cd;
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 6px solid #ffcc00;
+        color: #664d03;
+    }
+
+    .success-box {
+        background-color: #e8f5e9;
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 6px solid #2e7d32;
+        color: #1b5e20;
+    }
+
+    .info-card {
+        background-color: #f8f9fa;
+        padding: 18px;
+        border-radius: 12px;
+        border: 1px solid #e0e0e0;
+        margin-bottom: 12px;
+    }
+
+    .small-note {
+        color: #666;
+        font-size: 14px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# -----------------------------
+# Sidebar Branding
+# -----------------------------
+st.sidebar.title("💊 MediGuide AI")
+st.sidebar.caption("Smart Medicine Safety Assistant")
+
+st.sidebar.markdown("---")
+
+st.sidebar.header("⚙️ Search Preferences")
+
+search_mode = st.sidebar.radio(
+    "Choose search method",
+    [
+        "Search by Medicine Name",
+        "Upload Medicine Image"
+    ]
+)
+
+show_ai_summary = st.sidebar.checkbox(
+    "Show AI Simple Explanation",
+    value=True
+)
+
+st.sidebar.markdown("---")
+
+st.sidebar.header("🩺 Health Safety Profile")
+
+age_group = st.sidebar.selectbox(
+    "Age group",
+    [
+        "Adult",
+        "Child",
+        "Senior Citizen"
+    ]
+)
+
+kidney_issue = st.sidebar.checkbox("Kidney disease / kidney problem")
+liver_issue = st.sidebar.checkbox("Liver disease / liver problem")
+diabetes = st.sidebar.checkbox("Diabetes")
+pregnancy = st.sidebar.checkbox("Pregnant / planning pregnancy")
+allergy = st.sidebar.checkbox("Known medicine allergy")
+
+st.sidebar.markdown("---")
+
+st.sidebar.info(
+    "This app gives educational medicine information only. "
+    "Always consult a doctor or pharmacist before using any medicine."
+)
+
+
+# -----------------------------
+# Header
+# -----------------------------
+st.markdown('<p class="main-title">💊 MediGuide AI</p>', unsafe_allow_html=True)
+st.markdown(
+    '<p class="sub-title">Smart Medicine Safety & Drug Information Assistant</p>',
+    unsafe_allow_html=True
+)
 
 st.markdown(
     """
-<div class="main-header">
-<h1>💊 AI Medicine Safety & Drug Information Assistant</h1>
-<p>Search tablets, capsules, injections, syrups, tonics, and other medicines to understand official usage information, warnings, side effects, and safety cautions in simple language.</p>
-</div>
-""",
-    unsafe_allow_html=True,
+    <div class="warning-box">
+    <b>Medical Disclaimer:</b> This app is for educational and portfolio purposes only.
+    It does not provide medical diagnosis, prescription, or dosage recommendation.
+    Always consult a qualified doctor or pharmacist before taking any medicine.
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
-st.error(
-    "Medical safety disclaimer: This app is for educational and portfolio purposes only. "
-    "It is not a diagnosis, prescription, dosage recommendation, or replacement for a doctor/pharmacist. "
-    "Do not start, stop, or change medicines without professional advice."
-)
-
-with st.sidebar:
-    st.header("⚙️ App Settings")
-    use_groq = st.toggle(
-        "Use Groq AI summary if API key is configured",
-        value=False,
-        help="Add GROQ_API_KEY in Streamlit secrets or .env/environment. The app works without it using rule-based summary.",
-    )
-    st.markdown("---")
-    st.subheader("👤 Safety Profile")
-    age_group = st.selectbox("Age group", ["Adult", "Child", "Older adult"])
-    kidney_disease = st.checkbox("Kidney disease")
-    liver_disease = st.checkbox("Liver disease")
-    diabetes = st.checkbox("Diabetes")
-    pregnant = st.checkbox("Pregnant")
-    breastfeeding = st.checkbox("Breastfeeding")
-    allergy = st.text_input("Known allergy", placeholder="Example: penicillin")
-
-    profile = {
-        "age_group": age_group,
-        "kidney_disease": kidney_disease,
-        "liver_disease": liver_disease,
-        "diabetes": diabetes,
-        "pregnant": pregnant,
-        "breastfeeding": breastfeeding,
-        "allergy": allergy,
-    }
+st.write("")
 
 
-search_tab, image_tab, reminder_tab, about_tab = st.tabs(
-    ["🔍 Medicine Search", "📷 Image Scanner", "⏰ Reminder Dashboard", "📘 About Project"]
-)
+# -----------------------------
+# Helper Function
+# -----------------------------
+def show_health_cautions():
+    cautions = []
 
-
-def show_drug_result(medicine_name: str):
-    if not medicine_name.strip():
-        st.warning("Please enter a medicine name.")
-        return
-
-    with st.spinner("Searching public drug label data..."):
-        drug_info = get_drug_info(medicine_name)
-
-    if not drug_info:
-        st.error("No information found. Try generic name or correct spelling.")
-        return
-
-    caution_alerts = check_patient_cautions(drug_info, profile)
-    summary = generate_simple_summary(medicine_name, drug_info, caution_alerts, use_groq=use_groq)
-
-    st.success("Medicine information loaded. Please read disclaimer and consult a healthcare professional before using any medicine.")
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Display Name", drug_info.get("display_name", "N/A")[:25])
-    c2.metric("Generic", drug_info.get("generic_name", "N/A")[:25])
-    c3.metric("Route", drug_info.get("route", "N/A")[:25])
-    c4.metric("RxCUI", drug_info.get("rxnorm_rxcui", "N/A")[:25])
-
-    with st.expander("📌 Basic Details", expanded=True):
-        details = {
-            "Searched name": drug_info.get("searched_name"),
-            "Brand name": drug_info.get("brand_name"),
-            "Generic name": drug_info.get("generic_name"),
-            "Manufacturer": drug_info.get("manufacturer"),
-            "Product type": drug_info.get("product_type"),
-            "Route": drug_info.get("route"),
-            "Data source": drug_info.get("data_source_note"),
-        }
-        st.table(pd.DataFrame(details.items(), columns=["Field", "Value"]))
-
-    left, right = st.columns(2)
-    with left:
-        st.subheader("✅ Used For / Indications")
-        st.write(drug_info.get("indications", "Information not available"))
-
-        st.subheader("🧾 Dosage/Admin Label Text")
-        st.info(
-            "This section may contain official label text. Do not use it to self-dose. Follow only your doctor/pharmacist instructions."
+    if age_group == "Child":
+        cautions.append(
+            "👶 Child caution: Medicine usage and dosage for children must be decided by a pediatric doctor."
         )
-        st.write(drug_info.get("dosage", "Information not available"))
 
-        st.subheader("🚫 Contraindications")
-        st.write(drug_info.get("contraindications", "Information not available"))
+    if age_group == "Senior Citizen":
+        cautions.append(
+            "👵 Senior citizen caution: Older adults may need special dosage adjustment and monitoring."
+        )
 
-    with right:
-        st.subheader("⚠️ Warnings")
-        st.write(drug_info.get("warnings", "Information not available"))
+    if kidney_issue:
+        cautions.append(
+            "⚠️ Kidney caution: Some medicines can affect kidney function or need dose adjustment. Consult a doctor."
+        )
 
-        if drug_info.get("boxed_warning") != "Information not available":
-            st.subheader("🛑 Boxed Warning")
-            st.error(drug_info.get("boxed_warning"))
+    if liver_issue:
+        cautions.append(
+            "⚠️ Liver caution: Some medicines may affect the liver. Consult a doctor before using."
+        )
 
-        st.subheader("❗ Side Effects")
-        st.write(drug_info.get("side_effects", "Information not available"))
+    if diabetes:
+        cautions.append(
+            "🩸 Diabetes caution: Some medicines can affect blood sugar levels. Consult your doctor."
+        )
 
-    st.subheader("🧬 Drug Interactions")
-    st.write(drug_info.get("drug_interactions", "Information not available"))
+    if pregnancy:
+        cautions.append(
+            "🤰 Pregnancy caution: Do not use medicines during pregnancy without doctor advice."
+        )
 
-    st.subheader("🤰 Pregnancy / Breastfeeding Information")
-    st.write(drug_info.get("pregnancy_or_breastfeeding", "Information not available"))
+    if allergy:
+        cautions.append(
+            "🚨 Allergy caution: Avoid medicines that caused allergy before and consult a doctor immediately."
+        )
 
-    st.subheader("🛡️ Personal Safety Caution Alerts")
-    for alert in caution_alerts:
-        st.warning(alert)
-
-    st.subheader("🤖 Simple AI Explanation")
-    st.markdown(summary)
-
-    report_text = build_report(medicine_name, drug_info, caution_alerts, summary)
-    st.download_button(
-        label="⬇️ Download Medicine Report (.txt)",
-        data=report_text,
-        file_name=f"medicine_report_{medicine_name.replace(' ', '_')}.txt",
-        mime="text/plain",
-    )
+    if cautions:
+        st.markdown("### 🛡️ Personalized Safety Cautions")
+        for caution in cautions:
+            st.warning(caution)
 
 
-with search_tab:
-    st.header("🔍 Search Medicine")
+# -----------------------------
+# Tabs
+# -----------------------------
+tab1, tab2, tab3, tab4 = st.tabs(
+    [
+        "🔍 Medicine Search",
+        "📷 Image Scanner",
+        "⏰ Medicine Reminder",
+        "ℹ️ About Project"
+    ]
+)
+
+
+# -----------------------------
+# Tab 1: Medicine Search
+# -----------------------------
+with tab1:
+    st.markdown("## 🔍 Search Medicine Information")
+
     medicine_name = st.text_input(
-        "Enter tablet / injection / syrup / tonic / capsule name",
-        placeholder="Example: paracetamol, amoxicillin, insulin, cetirizine",
+        "Enter medicine name",
+        placeholder="Example: Paracetamol, Amoxicillin, Ibuprofen, Metformin"
     )
-    col_a, col_b = st.columns([1, 3])
-    with col_a:
-        search_clicked = st.button("Search Medicine", type="primary")
-    with col_b:
-        st.markdown(
-            "<p class='small-muted'>Tip: If brand name does not work, try the generic name.</p>",
-            unsafe_allow_html=True,
-        )
 
-    if search_clicked:
-        show_drug_result(medicine_name)
+    search_button = st.button("Search Medicine", type="primary")
 
-with image_tab:
-    st.header("📷 Medicine Strip / Bottle Image Scanner")
-    st.write("Upload a clear photo of a medicine strip, bottle, or label. OCR will try to read the medicine name.")
-    uploaded = st.file_uploader("Upload image", type=["png", "jpg", "jpeg"])
-    extracted_name = ""
-    if uploaded:
-        st.image(uploaded, caption="Uploaded medicine image", use_container_width=True)
-        if st.button("Extract Text from Image"):
+    if search_button:
+        if medicine_name.strip() == "":
+            st.error("Please enter a medicine name.")
+        else:
+            with st.spinner("Searching medicine information..."):
+                drug_data = get_drug_info(medicine_name)
+
+            if not drug_data:
+                st.error(
+                    "No official information found. Please check spelling or try using the generic medicine name."
+                )
+                st.info(
+                    "Example: Instead of searching brand name like Dolo 650, try Paracetamol or Acetaminophen."
+                )
+            else:
+                st.success("Medicine information found.")
+
+                show_health_cautions()
+
+                st.markdown("## 📋 Medicine Details")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("### ✅ Used For")
+                    st.write(drug_data.get("indications", "Information not available."))
+
+                    st.markdown("### 🧾 How to Use")
+                    st.write(
+                        drug_data.get(
+                            "dosage",
+                            "Use only as prescribed by a doctor."
+                        )
+                    )
+
+                with col2:
+                    st.markdown("### ⚠️ Warnings")
+                    st.write(drug_data.get("warnings", "Information not available."))
+
+                    st.markdown("### ❌ Side Effects")
+                    st.write(drug_data.get("side_effects", "Information not available."))
+
+                st.markdown("### 🚫 Contraindications")
+                st.write(drug_data.get("contraindications", "Information not available."))
+
+                if show_ai_summary:
+                    st.markdown("## 🤖 Simple AI Explanation")
+                    ai_summary = generate_simple_summary(medicine_name, drug_data)
+                    st.info(ai_summary)
+
+                st.markdown("## 👨‍⚕️ Doctor Advice")
+                st.write(
+                    "Do not start, stop, or change medicine dosage without consulting a doctor. "
+                    "Seek urgent medical help if you experience breathing difficulty, swelling, severe rash, "
+                    "chest pain, fainting, or serious allergic reaction."
+                )
+
+                report_text = create_text_report(
+                    medicine_name=medicine_name,
+                    drug_data=drug_data,
+                    age_group=age_group,
+                    kidney_issue=kidney_issue,
+                    liver_issue=liver_issue,
+                    diabetes=diabetes,
+                    pregnancy=pregnancy,
+                    allergy=allergy
+                )
+
+                st.download_button(
+                    label="📥 Download Medicine Report",
+                    data=report_text,
+                    file_name=f"{medicine_name}_medicine_report.txt",
+                    mime="text/plain"
+                )
+
+
+# -----------------------------
+# Tab 2: Image Scanner
+# -----------------------------
+with tab2:
+    st.markdown("## 📷 Medicine Image Scanner")
+    st.write(
+        "Upload a photo of a medicine strip, bottle, injection label, or tonic label. "
+        "The app will try to extract text from the image."
+    )
+
+    uploaded_image = st.file_uploader(
+        "Upload medicine image",
+        type=["jpg", "jpeg", "png"]
+    )
+
+    if uploaded_image is not None:
+        st.image(uploaded_image, caption="Uploaded Medicine Image", use_container_width=True)
+
+        if st.button("Extract Medicine Name from Image"):
             with st.spinner("Reading text from image..."):
-                extracted_text = extract_text_from_image(uploaded)
-            st.text_area("Extracted text", extracted_text, height=150)
-            extracted_name = extracted_text.split("\n")[0].strip() if extracted_text else ""
-            if extracted_name:
-                st.info(f"Suggested search text: {extracted_name}")
+                extracted_text = extract_text_from_image(uploaded_image)
 
-    manual_from_image = st.text_input(
-        "Enter or correct medicine name from image",
-        value=extracted_name,
-        placeholder="Type medicine name after checking OCR text",
-        key="image_manual_name",
+            if extracted_text:
+                st.markdown("### Extracted Text")
+                st.code(extracted_text)
+
+                st.info(
+                    "Copy the correct medicine name from the extracted text and search it in the Medicine Search tab."
+                )
+            else:
+                st.error(
+                    "Could not extract text clearly. Try uploading a clearer image with good lighting."
+                )
+
+
+# -----------------------------
+# Tab 3: Medicine Reminder
+# -----------------------------
+with tab3:
+    st.markdown("## ⏰ Medicine Reminder Dashboard")
+    st.write(
+        "Create a simple medicine schedule. This is only a planner, not a prescription."
     )
-    if st.button("Search This Medicine", key="search_image_name"):
-        show_drug_result(manual_from_image)
-
-with reminder_tab:
-    st.header("⏰ Simple Medicine Reminder Dashboard")
-    st.write("Create a local reminder table for demonstration. This does not send real notifications.")
 
     if "reminders" not in st.session_state:
         st.session_state.reminders = []
 
     with st.form("reminder_form"):
-        r1, r2, r3 = st.columns(3)
-        med = r1.text_input("Medicine name")
-        time_slot = r2.selectbox("Time", ["Morning", "Afternoon", "Evening", "Night", "Custom"])
-        food = r3.selectbox("Food instruction", ["As prescribed", "Before food", "After food", "With food"])
-        notes = st.text_input("Notes", placeholder="Example: doctor prescribed for 5 days")
+        med_name = st.text_input("Medicine name")
+        timing = st.selectbox(
+            "Time",
+            [
+                "Morning",
+                "Afternoon",
+                "Evening",
+                "Night"
+            ]
+        )
+        food_time = st.selectbox(
+            "Food instruction",
+            [
+                "As prescribed",
+                "Before food",
+                "After food",
+                "With food"
+            ]
+        )
+        start_date = st.date_input("Start date", value=date.today())
+        notes = st.text_area("Notes", placeholder="Example: Doctor prescribed for 5 days")
+
         submitted = st.form_submit_button("Add Reminder")
+
         if submitted:
-            if med.strip():
-                st.session_state.reminders.append(
-                    {"Medicine": med, "Time": time_slot, "Food": food, "Notes": notes or "-"}
-                )
-                st.success("Reminder added to dashboard.")
+            if med_name.strip() == "":
+                st.error("Please enter medicine name.")
             else:
-                st.warning("Enter medicine name first.")
+                st.session_state.reminders.append(
+                    {
+                        "Medicine": med_name,
+                        "Time": timing,
+                        "Food Instruction": food_time,
+                        "Start Date": start_date,
+                        "Notes": notes
+                    }
+                )
+                st.success("Reminder added successfully.")
 
     if st.session_state.reminders:
-        df = pd.DataFrame(st.session_state.reminders)
-        st.dataframe(df, use_container_width=True)
+        st.markdown("### Today's Medicine Schedule")
+        reminder_df = pd.DataFrame(st.session_state.reminders)
+        st.dataframe(reminder_df, use_container_width=True)
+
+        csv_data = reminder_df.to_csv(index=False)
+
         st.download_button(
-            "⬇️ Download Reminder CSV",
-            data=df.to_csv(index=False),
-            file_name="medicine_reminders.csv",
-            mime="text/csv",
+            label="📥 Download Reminder Schedule",
+            data=csv_data,
+            file_name="medicine_reminder_schedule.csv",
+            mime="text/csv"
         )
-        if st.button("Clear Reminders"):
+
+        if st.button("Clear All Reminders"):
             st.session_state.reminders = []
+            st.success("All reminders cleared.")
             st.rerun()
     else:
         st.info("No reminders added yet.")
 
-with about_tab:
-    st.header("📘 About This Portfolio Project")
+
+# -----------------------------
+# Tab 4: About Project
+# -----------------------------
+with tab4:
+    st.markdown("## ℹ️ About MediGuide AI")
+
+    st.write(
+        """
+        **MediGuide AI** is a smart medicine information web app built using Python and Streamlit.
+        It helps users search for general medicine information such as usage, warnings,
+        side effects, contraindications, and safety cautions.
+        """
+    )
+
+    st.markdown("### 🚀 Main Features")
+
     st.markdown(
         """
-### Project Goal
-Many people search medicine names online but struggle to understand official label information. This app gives a simple, educational interface for drug information lookup while clearly avoiding diagnosis or prescription.
-
-### Main Features
-- Search tablets, capsules, syrups, injections, tonics, and other medicines
-- Fetch public drug label information using openFDA
-- Normalize medicine names using RxNorm/RxNav
-- Show usage, warnings, side effects, contraindications, interactions, and pregnancy/breastfeeding information
-- Optional image OCR for medicine strip/bottle labels
-- Personal caution alerts for kidney disease, liver disease, diabetes, pregnancy, breastfeeding, allergy, child, and older adult use
-- Simple AI/rule-based summary
-- Downloadable medicine report
-- Reminder dashboard
-
-### Tech Stack
-Python, Streamlit, Requests, Pandas, Pillow, pytesseract, openFDA Drug Label API, RxNorm/RxNav API, optional Groq AI.
-
-### What This App Does NOT Do
-- Does not diagnose disease
-- Does not prescribe medicine
-- Does not recommend dosage
-- Does not confirm whether a drug is safe for a user
-- Does not replace a doctor or pharmacist
+        - Search tablets, injections, syrups, tonics, capsules, and other medicines
+        - Show general usage information
+        - Display warnings, side effects, and contraindications
+        - Health safety profile for kidney, liver, diabetes, pregnancy, allergy, and age group
+        - Medicine image scanner using OCR
+        - Medicine reminder dashboard
+        - Downloadable medicine report
+        - Simple AI explanation
         """
+    )
+
+    st.markdown("### 🛠️ Tech Stack")
+
+    st.markdown(
+        """
+        - Python
+        - Streamlit
+        - openFDA Drug Label API
+        - RxNorm API
+        - OCR
+        - AI Summary Module
+        - Pandas
+        """
+    )
+
+    st.markdown("### ⚠️ Important Disclaimer")
+
+    st.warning(
+        "This project is only for educational and portfolio purposes. "
+        "It does not replace a doctor, pharmacist, or medical professional. "
+        "Never use this app to decide medicine dosage or treatment."
     )
